@@ -60,31 +60,39 @@ def main():
 
     st.subheader(f"📰 뉴스 기사 ({len(filtered)}건)")
     for i, a in enumerate(filtered, 1):
-        with st.expander(f"{i}. {a.title[:80]}{'...' if len(a.title) > 80 else ''}"):
-            st.markdown(f"**요약**\n{a.summary}")
-            st.caption(f"핵심키워드: {', '.join(a.keywords) or '-'}")
+        title_display = a.title[:80] + ("..." if len(a.title) > 80 else "")
+        with st.expander(f"{i}. {title_display}"):
+            summary_display = a.summary if (a.summary and a.summary.strip()) else "(요약 없음 – 아래 링크에서 원문 확인)"
+            st.markdown("**요약**")
+            st.write(summary_display)
+            kw_display = ", ".join(a.keywords) if a.keywords else "추출된 키워드 없음"
+            st.caption(f"핵심키워드: {kw_display}")
             st.link_button("기사 보기", a.url)
 
     st.divider()
     st.subheader("📋 종합 콘텐츠")
+    st.caption("수집한 기사를 바탕으로 핵심 주제, 블로그 글, 스레드, 카드뉴스 초안을 생성합니다.")
 
     if st.session_state.get("synthesized") is None:
         if st.button("종합 콘텐츠 생성 (핵심 주제 + 블로그/스레드/카드뉴스)"):
             with st.spinner("종합 분석 중..."):
                 syn = synthesize(articles)
                 st.session_state["synthesized"] = syn
+        else:
+            st.info("👆 위 버튼을 누르면 핵심 주제, 블로그 글(1200자 내외), 스레드(200자 내외), 인스타 카드뉴스 5장이 생성됩니다.")
 
     syn: SynthesizedContent | None = st.session_state.get("synthesized")
     if syn:
+        st.markdown("---")
         st.markdown("#### 🎯 핵심 주제")
         st.info(syn.core_theme)
 
         st.markdown("#### 📝 블로그 글 (1200자 내외)")
-        st.text_area("", value=syn.blog_post, height=280, disabled=True, key="blog")
+        st.text_area("블로그 글", value=syn.blog_post, height=320, disabled=True, key="blog", label_visibility="collapsed")
         st.caption(f"글자 수: {len(syn.blog_post)}자")
 
         st.markdown("#### 🧵 스레드/트윗 (200자 내외)")
-        st.text_area("", value=syn.thread_content, height=100, disabled=True, key="thread")
+        st.text_area("스레드", value=syn.thread_content, height=120, disabled=True, key="thread", label_visibility="collapsed")
         st.caption(f"글자 수: {len(syn.thread_content)}자")
 
         st.markdown("#### 📱 인스타그램 카드뉴스 (5장)")

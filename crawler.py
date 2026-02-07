@@ -119,23 +119,35 @@ def _build_summary(soup: BeautifulSoup, body_text: str, title: str) -> str:
     return title or "요약 없음"
 
 
-def fetch_news_urls(query: str, max_items: int = 10) -> list[tuple[str, str, str]]:
+def _strip_html(html: str) -> str:
+    if not html or not html.strip():
+        return ""
+    soup = BeautifulSoup(html, "lxml")
+    return soup.get_text(separator=" ", strip=True)[:500]
+
+
+def fetch_news_urls(query: str, max_items: int = 10) -> list[tuple[str, str, str, str]]:
     """
     Google News RSS 또는 뉴스 검색에서 기사 URL 수집.
-    Returns: [(title, url, source), ...]
+    Returns: [(title, url, source, rss_summary), ...]
     """
-    results: list[tuple[str, str, str]] = []
+    results: list[tuple[str, str, str, str]] = []
     encoded = urllib.parse.quote_plus(query)
 
-    # 1) Google News RSS 시도 (일부 지역에서 동작)
+    # 1) Google News RSS (제목·요약 함께 수집)
     rss_url = f"https://news.google.com/rss/search?q={encoded}&hl=ko&gl=KR&ceid=KR:ko"
     try:
         import feedparser
         feed = feedparser.parse(rss_url, request_headers=REQUEST_HEADERS)
         for e in feed.entries[:max_items]:
             link = e.get("link") or (e.get("links") or [{}])[0].get("href")
-            if link:
-                results.append((e.get("title", "")[:200], link, e.get("source", {}).get("title", "")))
+            if not link:
+                continue
+            title = (e.get("title") or "").replace("&#39;", "'").replace("&quot;", '"')[:200]
+            rss_summary = _strip_html(e.get("summary") or e.get("description") or "")
+            src = e.get("source")
+            source = src.get("title", "") if isinstance(src, dict) else ""
+            results.append((title, link, source, rss_summary))
         if len(results) >= max_items:
             return results[:max_items]
     except Exception:
@@ -153,43 +165,72 @@ def fetch_news_urls(query: str, max_items: int = 10) -> list[tuple[str, str, str
             title_el = a.select_one("h3") or a
             title_text = title_el.get_text(strip=True)[:200] if title_el else ""
             if href and title_text:
-                results.append((title_text, href, "Google News"))
+                results.append((title_text, href, "Google News", ""))
             if len(results) >= max_items:
                 break
 
     return results[:max_items]
 
 
+_GENERIC_TITLES = ("google news", "google 뉴스", "news", "loading", "제목 없음", "")
+
+def _is_generic_title(title: str) -> bool:
+    if not title or len(title.strip()) < 3:
+        return True
+    t = title.strip().lower()
+    return t in _GENERIC_TITLES or t.startswith("google ") or "redirecting" in t
+
+
 def crawl_articles(query: str, max_articles: int = 10) -> list[NewsArticle]:
     """
     검색 키워드로 뉴스 10개 크롤링 후 각 기사별 제목, 요약, 핵심키워드 반환.
+    RSS 제목·요약을 우선 사용하고, 페이지에서 가져온 내용으로 보강.
     """
     url_tuples = fetch_news_urls(query, max_items=max_articles)
     articles: list[NewsArticle] = []
 
-    for title_from_rss, url, source in url_tuples:
+    for title_from_rss, url, source, rss_summary in url_tuples:
         html = _fetch_html(url)
         if not html:
+            summary = rss_summary[:400] if rss_summary else "본문을 불러오지 못했습니다. 아래 링크에서 확인하세요."
+            text_for_kw = title_from_rss + " " + rss_summary
+            kw = _keywords(text_for_kw, 5) if text_for_kw.strip() else []
+            if not kw and text_for_kw:
+                from collections import Counter
+                words = re.findall(r"[가-힣a-zA-Z]{2,}", text_for_kw)
+                stop = {"있다", "하다", "된다", "그리고", "그러나", "이번", "통해", "대해", "위해", "있는", "없는"}
+                kw = [w for w, _ in Counter(words).most_common(15) if w not in stop][:5]
             articles.append(NewsArticle(
                 title=title_from_rss or "로드 실패",
                 url=url,
-                summary="본문을 불러오지 못했습니다.",
-                keywords=[],
+                summary=summary,
+                keywords=kw,
                 source=source,
             ))
             continue
 
         soup = BeautifulSoup(html, "lxml")
-        title = _get_title(soup, url) or title_from_rss
+        page_title = _get_title(soup, url)
         body_text = _get_article_text(soup)
-        summary = _build_summary(soup, body_text, title)
+        page_summary = _build_summary(soup, body_text, page_title)
 
-        keywords: list[str] = _keywords(title + "\n" + (body_text or ""), 5)
-        if not keywords and body_text:
-            # 간단한 fallback: 2글자 이상 단어 빈도
+        title = title_from_rss if _is_generic_title(page_title) else (page_title or title_from_rss)
+        if not title:
+            title = title_from_rss or "제목 없음"
+
+        if page_summary and len(page_summary.strip()) > 50 and page_summary != title:
+            summary = page_summary[:400]
+        elif rss_summary and len(rss_summary.strip()) > 20:
+            summary = rss_summary[:400]
+        else:
+            summary = (title[:200] + "... (아래 링크에서 원문 확인)") if len(title) > 80 else f"{title} – 아래 링크에서 원문 확인"
+
+        text_for_kw = title + "\n" + (body_text or "") + " " + (rss_summary or "")
+        keywords: list[str] = _keywords(text_for_kw, 5)
+        if not keywords and (body_text or rss_summary or title):
             from collections import Counter
-            words = re.findall(r"[가-힣a-zA-Z]{2,}", body_text + " " + title)
-            stop = {"있다", "하다", "된다", "그리고", "그러나", "이번", "통해", "대해", "위해", "있는", "있는", "없는"}
+            words = re.findall(r"[가-힣a-zA-Z]{2,}", (body_text or "") + " " + (rss_summary or "") + " " + title)
+            stop = {"있다", "하다", "된다", "그리고", "그러나", "이번", "통해", "대해", "위해", "있는", "없는"}
             keywords = [w for w, _ in Counter(words).most_common(15) if w not in stop][:5]
 
         articles.append(NewsArticle(
@@ -198,7 +239,7 @@ def crawl_articles(query: str, max_articles: int = 10) -> list[NewsArticle]:
             summary=summary,
             keywords=keywords,
             source=source,
-            raw_text=body_text[:3000],
+            raw_text=(body_text or "")[:3000],
         ))
 
     return articles

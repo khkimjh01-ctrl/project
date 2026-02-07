@@ -100,40 +100,38 @@ def synthesize(articles: List[NewsArticle]) -> SynthesizedContent:
     if result:
         return result
 
-    # 템플릿 기반 (API 없을 때)
-    titles = [a.title for a in articles[:5]]
-    summaries = [a.summary for a in articles[:3]]
+    # 템플릿 기반 (API 없을 때) – 실제 기사 제목·요약 반영
+    titles = [a.title.strip() for a in articles if a.title.strip()][:5]
+    summaries = [a.summary.strip() for a in articles if a.summary and a.summary.strip()][:5]
     all_keywords = []
     for a in articles:
-        all_keywords.extend(a.keywords)
+        all_keywords.extend(k for k in a.keywords if k and k.strip())
     unique_kw = list(dict.fromkeys(all_keywords))[:8]
-    theme_kw = ", ".join(unique_kw[:3]) if unique_kw else "뉴스"
+    theme_kw = ", ".join(unique_kw[:3]) if unique_kw else (titles[0][:30] if titles else "뉴스")
 
     core_theme = f"종합된 핵심 주제: {theme_kw} 관련 최근 동향과 이슈"
 
-    blog_post = (
-        f"# {core_theme}\n\n"
-        "최근 뉴스들을 정리해 보면 다음과 같습니다.\n\n"
-        + "\n\n".join(f"## {t}\n{s}" for t, s in zip(titles[:3], summaries[:3]))
-        + "\n\n위 기사들을 종합하면, "
-        + (summaries[0][:200] if summaries else "")
-        + " ... (OPENAI_API_KEY를 설정하면 1200자 분량의 블로그 글이 자동 생성됩니다.)"
-    )
-    blog_post = blog_post[:1250]
+    blog_parts = [f"# {core_theme}\n", "최근 뉴스들을 정리하면 다음과 같습니다.\n"]
+    for i, t in enumerate(titles):
+        s = summaries[i] if i < len(summaries) else ""
+        blog_parts.append(f"## {t}\n{s}\n" if s else f"## {t}\n")
+    if summaries:
+        blog_parts.append("\n위 기사들을 종합하면, " + (summaries[0][:300] if summaries[0] else "") + " …")
+    blog_parts.append("\n\n※ OPENAI_API_KEY를 설정하면 1200자 분량의 블로그 글이 자동 생성됩니다.")
+    blog_post = "".join(blog_parts)[:1250]
 
-    thread_content = (
-        f"📌 {core_theme}\n\n"
-        + (summaries[0][:150] if summaries else "")
-        + " ... (API 키 설정 시 200자 내외 스레드 문구 자동 생성)"
-    )
-    thread_content = thread_content[:250]
+    thread_parts = [f"📌 {core_theme}\n"]
+    if summaries and summaries[0]:
+        thread_parts.append(summaries[0][:180])
+    thread_parts.append("\n\n※ API 키 설정 시 200자 내외 스레드 문구가 자동 생성됩니다.")
+    thread_content = "".join(thread_parts)[:250]
 
     cards = [
         f"카드 1: {core_theme}",
-        f"카드 2: {titles[0][:80] if titles else ''}",
-        f"카드 3: {summaries[0][:80] if summaries else ''}",
-        f"카드 4: 핵심 키워드 – {', '.join(unique_kw[:5])}",
-        "카드 5: 자세한 내용은 링크에서 확인하세요.",
+        f"카드 2: {titles[0][:80]}" if titles else "카드 2: (기사 제목)",
+        f"카드 3: {(summaries[0][:80] if summaries else '') or '(요약)'}",
+        f"카드 4: 핵심 키워드 – {', '.join(unique_kw[:5]) or '-'}",
+        "카드 5: 자세한 내용은 원문 링크에서 확인하세요.",
     ]
     return SynthesizedContent(
         core_theme=core_theme,
