@@ -1,0 +1,2 @@
+# Streamlit Cloud에서 시스템 패키지가 필요할 경우 여기에 추가
+# 예: libxml2-dev, libxslt-dev
