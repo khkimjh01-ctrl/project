@@ -1,14 +1,5 @@
-# 필수: 뉴스 크롤링 및 UI
+streamlit>=1.28.0
 requests>=2.31.0
 beautifulsoup4>=4.12.0
 feedparser>=6.0.0
 lxml>=4.9.0
-streamlit>=1.28.0
-
-# 선택: 요약/키워드 품질 향상 (설치 시 KeyBERT 사용)
-# sumy>=0.11.0
-# keybert>=0.8.0
-# sentence-transformers>=2.2.0
-
-# 선택: 종합 콘텐츠 고품질 생성 (API 키 설정 시)
-openai>=1.0.0
